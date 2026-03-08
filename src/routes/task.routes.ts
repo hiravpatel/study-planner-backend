@@ -1,0 +1,16 @@
+import { Router } from 'express';
+import { getTasks, createTask, updateTask, updateTaskStatus, generateRevisions, deleteTask } from '../controllers/task.controller';
+import { authenticateToken } from '../middlewares/auth.middleware';
+
+const router = Router();
+
+router.use(authenticateToken); // Protected routes
+
+router.get('/', getTasks);
+router.post('/', createTask);
+router.put('/:id', updateTask);
+router.put('/:id/status', updateTaskStatus);
+router.post('/:id/revisions', generateRevisions);
+router.delete('/:id', deleteTask);
+
+export default router;
