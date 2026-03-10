@@ -17,13 +17,15 @@ export const getTasks = async (req: AuthRequest, res: Response): Promise<void> =
 export const createTask = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const { subjectId, topic, studyTime, priority, dueDate, spacedRepetitionDays, offlineId } = req.body;
+    const { subjectId, topic, studyTime, startTime, endTime, priority, dueDate, spacedRepetitionDays, offlineId } = req.body;
 
     const task = new Task({
       userId,
       subjectId,
       topic,
       studyTime,
+      startTime,
+      endTime,
       priority,
       dueDate,
       spacedRepetitionDays: spacedRepetitionDays || [1, 3, 7, 30],
@@ -66,11 +68,11 @@ export const updateTaskStatus = async (req: AuthRequest, res: Response): Promise
   try {
     const userId = req.user?.id;
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, note } = req.body || {};
 
     const task = await Task.findOneAndUpdate(
       { _id: id, userId },
-      { $set: { status } },
+      { $set: { status, ...(note !== undefined && { note }) } },
       { new: true }
     );
 
@@ -83,6 +85,42 @@ export const updateTaskStatus = async (req: AuthRequest, res: Response): Promise
   } catch (error) {
     console.error('updateTaskStatus error:', error);
     res.status(500).json({ error: 'Failed to update task status' });
+  }
+};
+
+export const extendTaskTime = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    const { additionalMinutes } = req.body || {};
+
+    const task = await Task.findOne({ _id: id, userId });
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    const extraMins = additionalMinutes || 15;
+
+    if (task.endTime) {
+      const [hours, minutes] = task.endTime.split(':').map(Number);
+      const endDate = new Date();
+      endDate.setHours(hours, minutes, 0, 0);
+      endDate.setMinutes(endDate.getMinutes() + extraMins);
+      
+      const newHours = endDate.getHours().toString().padStart(2, '0');
+      const newMinutes = endDate.getMinutes().toString().padStart(2, '0');
+      task.endTime = `${newHours}:${newMinutes}`;
+    }
+
+    task.isExtended = true;
+    task.studyTime += extraMins;
+    await task.save();
+
+    res.json({ message: 'Task time extended', task });
+  } catch (error) {
+    console.error('extendTaskTime error:', error);
+    res.status(500).json({ error: 'Failed to extend task time' });
   }
 };
 
@@ -127,8 +165,44 @@ export const generateRevisions = async (req: AuthRequest, res: Response): Promis
 
     res.json({ message: 'Revisions scheduled successfully', task, generatedRevisions: generatedTasks.length });
   } catch (error) {
-    console.error('completeTask error:', error);
-    res.status(500).json({ error: 'Failed to complete task' });
+    console.error('generateRevisions error:', error);
+    res.status(500).json({ error: 'Failed to schedule revisions' });
+  }
+};
+
+export const carryOverTask = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const { id } = req.params;
+    
+    // Default to 'tomorrow' if no targetDate is passed
+    const { targetDate } = req.body || {}; 
+
+    const task = await Task.findOne({ _id: id, userId });
+    if (!task) {
+      res.status(404).json({ error: 'Task not found' });
+      return;
+    }
+
+    let nextDate: Date;
+    if (targetDate) {
+      nextDate = new Date(targetDate);
+    } else {
+      nextDate = new Date();
+      nextDate.setDate(nextDate.getDate() + 1);
+    }
+
+    // We simply update the current task's dueDate to the next date
+    // and mark it carriedOver
+    task.dueDate = nextDate;
+    task.carriedOver = true;
+    task.status = TaskStatus.TODO; // Reset it to TODO usually
+    await task.save();
+
+    res.json({ message: 'Task carried over successfully', task });
+  } catch (error) {
+    console.error('carryOverTask error:', error);
+    res.status(500).json({ error: 'Failed to carry over task' });
   }
 };
 

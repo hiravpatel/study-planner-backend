@@ -4,6 +4,7 @@ import Task, { TaskStatus } from '../models/Task';
 import Subject from '../models/Subject';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import mongoose from 'mongoose';
+import PDFDocument from 'pdfkit';
 
 export const getDashboardStats = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -85,5 +86,102 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
   } catch (error) {
     console.error('getDashboardStats error:', error);
     res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+};
+
+export const getWeeklyReport = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setHours(0, 0, 0, 0);
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 6); // Last 7 days including today
+
+    const tasks = await Task.find({
+      userId: userObjectId,
+      dueDate: { $gte: oneWeekAgo }
+    });
+
+    const dailyStats = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return {
+        date: d.toISOString().split('T')[0],
+        completed: 0,
+        pending: 0,
+      };
+    });
+
+    tasks.forEach(task => {
+      const taskDate = new Date(task.dueDate).toISOString().split('T')[0];
+      const dayStat = dailyStats.find(d => d.date === taskDate);
+      if (dayStat) {
+        if (task.status === TaskStatus.COMPLETED) {
+          dayStat.completed += 1;
+        } else {
+          dayStat.pending += 1;
+        }
+      }
+    });
+
+    res.json({ dailyStats });
+  } catch (error) {
+    console.error('getWeeklyReport error:', error);
+    res.status(500).json({ error: 'Failed to fetch weekly report' });
+  }
+};
+
+export const downloadWeeklyReportPDF = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+    const tasks = await Task.find({
+      userId: userObjectId,
+      dueDate: { $gte: oneWeekAgo }
+    });
+
+    const completed = tasks.filter(t => t.status === TaskStatus.COMPLETED).length;
+    const pending = tasks.length - completed;
+
+    const doc = new PDFDocument({ margin: 50 });
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=weekly-report.pdf');
+
+    doc.pipe(res);
+
+    doc.fontSize(24).font('Helvetica-Bold').fillColor('#0f172a').text('Weekly Study Report', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(12).font('Helvetica').fillColor('#64748b').text(`Generated on: ${new Date().toLocaleDateString()}`, { align: 'center' });
+    doc.moveDown(2);
+
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e293b').text('Summary', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(12).font('Helvetica').fillColor('#334155');
+    doc.text(`Total Tasks: ${tasks.length}`);
+    doc.text(`Completed Tasks: ${completed}`);
+    doc.text(`Pending Tasks: ${pending}`);
+    doc.moveDown(2);
+
+    doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e293b').text('Task Details', { underline: true });
+    doc.moveDown();
+
+    tasks.forEach((task: any, index) => {
+      const statusColor = task.status === TaskStatus.COMPLETED ? '#10b981' : '#f59e0b';
+      doc.fontSize(12).font('Helvetica-Bold').fillColor(statusColor).text(`[${task.status}] `, { continued: true });
+      doc.font('Helvetica').fillColor('#334155').text(`${task.topic} - ${new Date(task.dueDate).toLocaleDateString()}`);
+      doc.moveDown(0.5);
+    });
+
+    doc.end();
+
+  } catch (error) {
+    console.error('downloadWeeklyReportPDF error:', error);
+    res.status(500).json({ error: 'Failed to generate PDF' });
   }
 };

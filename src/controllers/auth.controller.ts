@@ -12,7 +12,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     // Check existing user
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      res.status(400).json({ error: 'User already exists' });
+      res.status(400).json({ error: 'Email is already registered. Please log in instead.' });
       return;
     }
 
@@ -47,13 +47,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     const user = await User.findOne({ email });
     if (!user) {
-      res.status(401).json({ error: 'Invalid email or password' });
+      res.status(401).json({ error: 'No account found with this email address.' });
       return;
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
-      res.status(401).json({ error: 'Invalid email or password' });
+      res.status(401).json({ error: 'Incorrect password. Please try again.' });
       return;
     }
 
